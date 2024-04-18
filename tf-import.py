@@ -2,7 +2,7 @@ import sdwan_api, json, re, os, sys
 
 # input parameters
 target_fname = "sdwan-dbg"
-target_templates = ["DC_R01_TEMPLATE"] if len (sys.argv)==1 else sys.argv[1:]
+target_templates = ["BRANCH_TEMPLATE_HAPLUS_R1_LTE_[c8200]"] if len (sys.argv)==1 else sys.argv[1:]
 tfstate_file = "terraform.tfstate"
 
 # working variables
@@ -97,16 +97,18 @@ def process_feature_template (ftpl):
     ftpl_type = ftpl["templateType"].replace("-","_")
     if ftpl_type in template_type_fix.keys():
          ftpl_type = template_type_fix[ftpl_type]
-    print (f">>> TYPE: {ftpl_type}") 
     text_tf.add (f'resource "sdwan_{ftpl_type}_feature_template" "{ftpl_name}" {{\n}}')
     text_bash.add (f'terraform import sdwan_{ftpl_type}_feature_template.{ftpl_name} {ftpl_id}')
     seen_ftemplates.add(ftpl_id)
+
+def sanitize(s):
+    return re.sub("[\[\]\^\ \-\~]", "_", s)
 
 def process_device_template (template, attached, variables): 
     # text_tf, text_bash, text_att - global objects
 
     tID = template.get('templateId')
-    tName = template.get('templateName')
+    tName = sanitize(template.get('templateName'))
     if not tID or not tName:
         print (f"Unexpected template: {template}")
         return
@@ -187,7 +189,7 @@ def tfstate_process_list (text, res_type):
 
     return out.text.rstrip("\n")
 
-sort_seq = ["id", "name", "description", "device_types", "vpn_id"]
+sort_seq = ["id", "name", "description", "device_types", "vpn_id", "interface_name", "interface_description", "address_variable", "dhcp"]
 
 def SortFunction (item):
     try:
@@ -226,6 +228,9 @@ seen_ftemplates = set()
 # ============ Step 1: read data from vManage, prepare empty TF structures and import script
 for target_template in target_templates:
     target_template_id = find_template_id(device_templates, target_template)
+    if not target_template_id:
+        # print (f"Device template {target_template} not found")
+        raise SystemExit (f"Device template {target_template} not found, exiting...")
     # Obtain content of device template
     template = sdwan.api_GET(f"/template/device/object/{target_template_id}")
     attached = sdwan.api_GET(f"/template/device/config/attached/{target_template_id}")['data']
@@ -302,7 +307,7 @@ for resource in tfstate["resources"]:
             # if type (value) == int:
             #     value = str (value)
             if type (value) == str:
-                value = '"'+value+'"'
+                value = '"'+value.replace("\n","\\n")+'"' # CLI template comes with "\n"
             if type (value) == list:
                 # simple list - keep 1 liner
                 if type (value[0]) == str:
@@ -320,7 +325,7 @@ for resource in tfstate["resources"]:
 with open(target_fname_tf, "w") as file:
     file.write (tf_header)
     file.write (text_tff.text)
-    file.write (text_att.text)
+    # file.write (text_att.text)
 
 print (f'Complete, check "{target_fname_tf}" file!')
 
