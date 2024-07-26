@@ -84,5 +84,3 @@ class sdwan_api:
     return response
 
 #
-#
-#
