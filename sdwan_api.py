@@ -21,9 +21,7 @@ class sdwan_api:
     token_url = self.base_api_url + "/client/token?json=true"
     login_data = {"j_username": username, "j_password": password}
 
-    response = self.session.post(url=login_url, 
-                   data=login_data, 
-                   verify=False)
+    response = self.session.post(url=login_url, data=login_data, verify=False)
     response.raise_for_status ()
 
     # If authenticated, the response body is empty. 
@@ -52,8 +50,7 @@ class sdwan_api:
 
   def api_action (self, method, url, payload = {}):
     try:
-      response = self.session.request (method=method, url=url, 
-                       json=payload)
+      response = self.session.request (method=method, url=url, json=payload)
       response.raise_for_status()
     except:
       raise SystemExit (f"{method} request failed: {url},"
@@ -64,9 +61,7 @@ class sdwan_api:
     except:
       data = ""
 
-    # comment to stop debugging:
     # print (f"\n>>> HTTP {method} {url}, status: {response.status_code}")
-    # uncomment for more debugging:
     # if data:
     #   print (json.dumps(data, indent=4))
 

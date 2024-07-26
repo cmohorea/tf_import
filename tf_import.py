@@ -1,8 +1,9 @@
 import sdwan_api, json, re, os, sys
+from tf_library import mytext
 
 # input parameters
 target_fname = "sdwan-dbg"
-target_templates = ["BRANCH_TEMPLATE_HAPLUS_R1_LTE_[c8200]"] if len (sys.argv)==1 else sys.argv[1:]
+target_templates = ["LAB1_SITE7_LARGE_SITE_ADJACENT"] if len (sys.argv)==1 else sys.argv[1:]
 tfstate_file = "terraform.tfstate"
 
 # working variables
@@ -19,13 +20,20 @@ template_type_fix = {
     "vpn_cedge_interface_cellular": "vpn_interface_cellular"
 }
 
+sort_seq = ["id", "name", "description", "device_types", "vpn_id", 
+            "shutdown", "shutdown_variable", 
+            "interface_name", "interface_name_variable", 
+            "interface_description", "interface_description_variable"
+            "address_variable", "dhcp"]
+
+
 tf_header = \
 """
 terraform {
   required_providers {
     sdwan = {
       source = "CiscoDevNet/sdwan"
-      version = ">= 0.3.7"
+      version = ">= 0.3.9"
     }
   }
 }
@@ -65,17 +73,6 @@ def find_template_name (templates, id):
         if template.get('templateId') == id:
             return template.get('templateName')
     return None
-
-# Helper function
-class mytext:
-    def __init__ (self):
-        self.text = ""
-
-    def addraw (self, line):
-        self.text = self.text + line
-
-    def add (self, line):
-        self.addraw (line + "\n")
 
 def get_var_name (field):
     """ Extract var name from long GUI name """
@@ -140,7 +137,7 @@ def process_device_template (template, attached, variables):
         for dev in variables["data"]:
             if dev["csv-deviceId"] == device["uuid"]:
                 for key in sorted(dev.keys()):
-                    if key[0] == "/":   # ignore csv-... values
+                    if key[:4] != "csv-":   # ignore csv-... values
                         text_att.add (f'        {var_index[key]} = "{dev[key]}"')
         text_att.add ( '      },')
         text_att.add ( '    },')
@@ -211,11 +208,6 @@ if not manager or not username or not password:
 
 sdwan = sdwan_api.sdwan_api (manager, username, password)
 
-os.system(f"rm ./terraform.tfstate 2>/dev/null")
-with open(target_fname_tf, "w") as file:
-    file.write (tf_header)
-print (f'Terraform init status: {os.system(f"terraform init")}')
-
 # Obtain a list of all device and feature templates 
 device_templates = sdwan.api_GET("/template/device")['data']
 feature_templates = sdwan.api_GET("/template/feature?summary=true")['data']
@@ -223,6 +215,12 @@ text_tf = mytext()
 text_bash = mytext()
 text_att = mytext()
 seen_ftemplates = set()
+
+# Init TF
+os.system(f"rm ./terraform.tfstate 2>/dev/null")
+with open(target_fname_tf, "w") as file:
+    file.write (tf_header)
+print (f'Terraform init status: {os.system(f"terraform init")}')
 
 
 # ============ Step 1: read data from vManage, prepare empty TF structures and import script
@@ -307,7 +305,9 @@ for resource in tfstate["resources"]:
             # if type (value) == int:
             #     value = str (value)
             if type (value) == str:
-                value = '"'+value.replace("\n","\\n")+'"' # CLI template comes with "\n"
+                value = value.replace("\n","\\n")   # CLI templates come with "\n" or "\r\n"
+                value = value.replace("\r","")
+                value = f'"{value}"' 
             if type (value) == list:
                 # simple list - keep 1 liner
                 if type (value[0]) == str:
@@ -325,7 +325,7 @@ for resource in tfstate["resources"]:
 with open(target_fname_tf, "w") as file:
     file.write (tf_header)
     file.write (text_tff.text)
-    # file.write (text_att.text)
+    file.write (text_att.text)
 
 print (f'Complete, check "{target_fname_tf}" file!')
 
