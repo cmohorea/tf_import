@@ -2,13 +2,14 @@ import sdwan_api, json, re, os, sys
 from tf_library import mytext
 
 # input parameters
-target_fname = "sdwan-dbg"
-target_templates = ["LAB1_SITE7_LARGE_SITE_ADJACENT"] if len (sys.argv)==1 else sys.argv[1:]
+target_fname = "sdwan-tf-import"
+target_templates = ""
 tfstate_file = "terraform.tfstate"
 
 # working variables
-target_fname_tf = f"{target_fname}.tf"
-target_fname_import = f"{target_fname}-import.sh"
+target_fname_tf = f"{target_fname}-config.tf"
+target_fname_attach = f"{target_fname}-attach.tf"
+target_fname_import = f"{target_fname}.sh"
 
 commented = ["id"]
 skipped = [None, "template_type"]
@@ -33,7 +34,7 @@ terraform {
   required_providers {
     sdwan = {
       source = "CiscoDevNet/sdwan"
-      version = ">= 0.3.9"
+      version = ">= 0.3.10"
     }
   }
 }
@@ -49,7 +50,6 @@ provider "sdwan" {
 }
 
 """
-
 
 variables_request = {
     'templateId': '',
@@ -197,13 +197,20 @@ def SortFunction (item):
 
 # ------------------------------ start of the script ------------------------------------------
 # ============ Step 0: Init
+
+if len (sys.argv)==1:
+    # os.path.basename(__file__)
+    print (f"Usage: {os.path.basename(__file__)} <Device Template Name> [<Device Template Name> [<Device Template Name> ... ]]")
+    exit (1)
+target_templates = sys.argv[1:]
+
 # Initialize API object
 manager = os.environ.get("TF_VAR_MANAGER_ADDR") 
 username = os.environ.get("TF_VAR_MANAGER_USER") 
 password = os.environ.get("TF_VAR_MANAGER_PASS") 
 
 if not manager or not username or not password:
-    print ("Please define environment variables for SD-WAN access")
+    print ("Please define TF_VAR_MANAGER_ADDR/TF_VAR_MANAGER_USER/TF_VAR_MANAGER_PASS environment variables for SD-WAN access")
     exit (1)
 
 sdwan = sdwan_api.sdwan_api (manager, username, password)
@@ -211,17 +218,23 @@ sdwan = sdwan_api.sdwan_api (manager, username, password)
 # Obtain a list of all device and feature templates 
 device_templates = sdwan.api_GET("/template/device")['data']
 feature_templates = sdwan.api_GET("/template/feature?summary=true")['data']
-text_tf = mytext()
-text_bash = mytext()
-text_att = mytext()
+
+# init text structures
+text_bash = mytext(target_fname_import, "#!/bin/bash\n\n")
+text_tf   = mytext(target_fname_tf, tf_header)
+text_tff  = mytext(target_fname_tf, tf_header)
+text_att  = mytext(target_fname_attach)
+
 seen_ftemplates = set()
 
-# Init TF
-os.system(f"rm ./terraform.tfstate 2>/dev/null")
+# Init TF: clean up old tfstate and init provider
+os.system(f"mv ./terraform.tfstate ./terraform.tfstate.~~~bck 2>/dev/null")
 with open(target_fname_tf, "w") as file:
     file.write (tf_header)
-print (f'Terraform init status: {os.system(f"terraform init")}')
-
+tf_init_result = os.system(f"terraform init -upgrade")
+if tf_init_result != 0:
+    print (f'Terraform init status: {tf_init_result}')
+    raise SystemExit (f"Terraform initialization failed, exiting...")
 
 # ============ Step 1: read data from vManage, prepare empty TF structures and import script
 for target_template in target_templates:
@@ -243,15 +256,10 @@ for target_template in target_templates:
 
     process_device_template (template, attached, variables)
 
-# ============ Step 2: Write skeleton TF structures and import script
-with open(target_fname_tf, "w") as file:
-    file.write (tf_header)
-    file.write (text_tf.text)
-    # file.write (text_att.text)
 
-with open(target_fname_import, "w") as file:
-    file.write ("#!/bin/bash\n\n")
-    file.write (text_bash.text)
+# ============ Step 2: Write skeleton TF structures and import script
+text_bash.write()
+text_tf.write()
 
 # ============ Step 3: Execute import script and populate tfstate with live data
 os.system(f"chmod +x {target_fname_import}")
@@ -267,7 +275,6 @@ tfstate = load_tf_file (tfstate_file)
 if not tfstate:
     raise SystemExit (f"Cannot load {tfstate_file} file")
 
-text_tff = mytext()
 all_IDs = {}
 
 # First, loop through to create IDs -> Name map 
@@ -322,12 +329,10 @@ for resource in tfstate["resources"]:
     text_tff.add ("}\n")
     
 # ============ Step 5: Write final TF structures + add device variables from Step 1
-with open(target_fname_tf, "w") as file:
-    file.write (tf_header)
-    file.write (text_tff.text)
-    file.write (text_att.text)
+text_tff.write()
+text_att.write()
 
-print (f'Complete, check "{target_fname_tf}" file!')
+print (f'Job complete, check *.tf file!')
 
 # ============ Step 6: Thank you and good bye
 try:
