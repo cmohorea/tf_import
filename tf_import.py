@@ -7,7 +7,8 @@ target_templates = ""
 tfstate_file = "terraform.tfstate"
 
 # working variables
-target_fname_tf = f"{target_fname}-config.tf"
+target_fname_main = f"{target_fname}-config.tf"
+target_fname_device = f"{target_fname}-device.tf"
 target_fname_attach = f"{target_fname}-attach.tf"
 target_fname_import = f"{target_fname}.sh"
 
@@ -34,7 +35,7 @@ terraform {
   required_providers {
     sdwan = {
       source = "CiscoDevNet/sdwan"
-      version = ">= 0.3.10"
+      version = ">= 0.3.13"
     }
   }
 }
@@ -77,11 +78,20 @@ def find_template_name (templates, id):
 def get_var_name (field):
     """ Extract var name from long GUI name """
 
+    # Use value in brackets or just return a full original name
     result = re.search(r"\((.*)\)$", field)
-    if  result:
-        return result.group(1)
-    else:
-        return field
+    value = result.group(1) if result else field
+
+    #add quotes if space in var name. or do it always?..
+    if " " in value:
+        value = '"' + value + '"'
+
+    # if  result:
+    #     result = result.group(1)
+    # else:
+    #     result = field
+    
+    return value
 
 def process_feature_template (ftpl):
 
@@ -126,23 +136,23 @@ def process_device_template (template, attached, variables):
     for col in variables["header"]["columns"]:
         var_index[col["property"]] = get_var_name(col["title"])
 
-    text_att.add (f'resource "sdwan_attach_feature_device_template" "{tName}" {{')
-    text_att.add (f'  id = sdwan_feature_device_template.{tName}.id')
-    text_att.add (f'  version = sdwan_feature_device_template.{tName}.version')
-    text_att.add (f'  devices = [')
+    text_attach.add (f'resource "sdwan_attach_feature_device_template" "{tName}" {{')
+    text_attach.add (f'  id = sdwan_feature_device_template.{tName}.id')
+    text_attach.add (f'  version = sdwan_feature_device_template.{tName}.version')
+    text_attach.add (f'  devices = [')
     for device in attached:
-        text_att.add ( '    {')
-        text_att.add (f'      id = "{device["uuid"]}"')
-        text_att.add ( '      variables = {')
+        text_attach.add ( '    {')
+        text_attach.add (f'      id = "{device["uuid"]}"')
+        text_attach.add ( '      variables = {')
         for dev in variables["data"]:
             if dev["csv-deviceId"] == device["uuid"]:
                 for key in sorted(dev.keys()):
                     if key[:4] != "csv-":   # ignore csv-... values
-                        text_att.add (f'        {var_index[key]} = "{dev[key]}"')
-        text_att.add ( '      },')
-        text_att.add ( '    },')
-    text_att.add ( '  ]')
-    text_att.add ( '}')
+                        text_attach.add (f'        {var_index[key]} = "{dev[key]}"')
+        text_attach.add ( '      },')
+        text_attach.add ( '    },')
+    text_attach.add ( '  ]')
+    text_attach.add ( '}')
 
     return 
     
@@ -170,7 +180,7 @@ def tfstate_process_list (text, res_type):
         if ": null" in line:
             continue
         # hacking for device templates, replace ID with TF obj reference
-        # "id": "1039812038" -> "id": sdwan_cedge_aaa_feature_template.Global_AAA.id,
+        # "id": "1039812038" -> "id" = sdwan_cedge_aaa_feature_template.Global_AAA.id,
         if '"id":' in line and res_type == res_type_device_template:  
             l = line.split (":")
             indent = len (l[0]) - len (l[0].lstrip())
@@ -195,14 +205,76 @@ def SortFunction (item):
         idx = "9999"
     return idx + item
 
-# ------------------------------ start of the script ------------------------------------------
+def text_add (text, resource_type):
+    if resource_type == res_type_device_template:
+        text_device.add (text)
+    else:
+        text_main.add (text)
+
+def process_tfstate_file ():
+    """ go through the tfstate file and extract non-default values """
+
+    for resource in tfstate["resources"]:
+        resource_type = resource["type"]
+        text_add (f'resource \"{resource_type}\" \"{resource["name"]}\" {{', resource_type)
+
+        for item in resource["instances"]:
+
+            keylist = list(item["attributes"].keys())
+            keylist.sort (key = SortFunction)
+            for key in keylist:
+                value = item["attributes"][key]
+                
+                if value in skipped or key in skipped:
+                    continue
+
+                # comment = "# " if key in commented else ""
+                if key == "id":
+                    key = "# " + key
+                    # # change id to name for the "attach" resource
+                    # if resource_type == res_type_device_attach: 
+                    #     value = all_IDs[value] + ".id~~~~~~~~"
+                    # else:
+                    #     key = "# " + key
+
+                # json formats to TF formats
+                if type (value) == bool:
+                    value = str (value).lower()
+                # if type (value) == int:
+                #     value = str (value)
+                if type (value) == str:
+                    value = value.replace("\n","\\n")   # CLI templates come with "\n" or "\r\n"
+                    value = value.replace("\r","")
+                    value = f'"{value}"' 
+                if type (value) == list:
+                    # simple list - keep 1 liner
+                    if type (value[0]) == str:
+                        value = str(value)
+                    # complex structure - process line by line
+                    else:
+                        value = tfstate_process_list (json.dumps(value, indent=2), resource_type)
+
+                    value = value.replace("'",'"')
+                
+                text_add (f"  {key} = {value}", resource_type)
+        text_add ("}\n", resource_type)
+
+
+#
+# # ------------------------------ start of the script ------------------------------------------
+#
+
 # ============ Step 0: Init
 
 if len (sys.argv)==1:
     # os.path.basename(__file__)
-    print (f"Usage: {os.path.basename(__file__)} <Device Template Name> [<Device Template Name> [<Device Template Name> ... ]]")
+    print ( "Cisco SD-WAN Terraform configuration importer")
+    print ( "**** DO NOT RUN IN THE PRODUCTION DIRECTORY ****\n")
+    print (f"Usage: {os.path.basename(__file__)} <Device Template Name> [<Device Template Name> [<Device Template Name> ... ]]\n")
+    print ( "If device template is not found, a complete list will be displayed.")
     exit (1)
 target_templates = sys.argv[1:]
+# target_templates = ["LAB1_SITE7_LARGE_SITE_ADJACENT1"]
 
 # Initialize API object
 manager = os.environ.get("TF_VAR_MANAGER_ADDR") 
@@ -213,35 +285,41 @@ if not manager or not username or not password:
     print ("Please define TF_VAR_MANAGER_ADDR/TF_VAR_MANAGER_USER/TF_VAR_MANAGER_PASS environment variables for SD-WAN access")
     exit (1)
 
+# Init TF: clean up old tfstate and initialize provider
+os.system(f"mv ./terraform.tfstate ./terraform.tfstate.~~~bck 2>/dev/null")
+with open(target_fname_main, "w") as file:
+    file.write (tf_header)
+
+tf_init_result = os.system(f"terraform init -upgrade")
+if tf_init_result != 0:
+    print (f'Terraform init status: {tf_init_result}')
+    raise SystemExit (f"Terraform initialization failed, exiting...")
+
+# init text structures
+text_bash    = mytext(target_fname_import, "#!/bin/bash\n\n")  # bash import script
+text_tf      = mytext(target_fname_main, tf_header)            # first TF skeleton
+text_main    = mytext(target_fname_main, tf_header)            # final TF file: feature templates
+text_device  = mytext(target_fname_device)                     # final TF file: device templates
+text_attach  = mytext(target_fname_attach)                     # final TF file: "attach" resources
+
+seen_ftemplates = set()
+all_IDs = {}
+
+# ============ Step 1: read data from vManage, prepare empty TF structures and import script
 sdwan = sdwan_api.sdwan_api (manager, username, password)
 
 # Obtain a list of all device and feature templates 
 device_templates = sdwan.api_GET("/template/device")['data']
 feature_templates = sdwan.api_GET("/template/feature?summary=true")['data']
 
-# init text structures
-text_bash = mytext(target_fname_import, "#!/bin/bash\n\n")
-text_tf   = mytext(target_fname_tf, tf_header)
-text_tff  = mytext(target_fname_tf, tf_header)
-text_att  = mytext(target_fname_attach)
-
-seen_ftemplates = set()
-
-# Init TF: clean up old tfstate and init provider
-os.system(f"mv ./terraform.tfstate ./terraform.tfstate.~~~bck 2>/dev/null")
-with open(target_fname_tf, "w") as file:
-    file.write (tf_header)
-tf_init_result = os.system(f"terraform init -upgrade")
-if tf_init_result != 0:
-    print (f'Terraform init status: {tf_init_result}')
-    raise SystemExit (f"Terraform initialization failed, exiting...")
-
-# ============ Step 1: read data from vManage, prepare empty TF structures and import script
 for target_template in target_templates:
     target_template_id = find_template_id(device_templates, target_template)
     if not target_template_id:
-        # print (f"Device template {target_template} not found")
-        raise SystemExit (f"Device template {target_template} not found, exiting...")
+        print (f"Device template {target_template} not found. The following device templates are available:")
+        for template in device_templates:
+            print (f"- {template.get('templateName')}")
+        raise SystemExit ("Exiting...")
+
     # Obtain content of device template
     template = sdwan.api_GET(f"/template/device/object/{target_template_id}")
     attached = sdwan.api_GET(f"/template/device/config/attached/{target_template_id}")['data']
@@ -275,62 +353,19 @@ tfstate = load_tf_file (tfstate_file)
 if not tfstate:
     raise SystemExit (f"Cannot load {tfstate_file} file")
 
-all_IDs = {}
-
-# First, loop through to create IDs -> Name map 
+# Create ID -> Name map 
 for resource in tfstate["resources"]:
     for item in resource["instances"]:
         id = item["attributes"].get("id")
         name = f'{resource["type"]}.{resource["name"]}' 
         all_IDs[id] = name  
 
-for resource in tfstate["resources"]:
-    resource_type = resource["type"]
-    text_tff.add (f'resource \"{resource_type}\" \"{resource["name"]}\" {{')
-
-    for item in resource["instances"]:
-
-        keylist = list(item["attributes"].keys())
-        keylist.sort (key = SortFunction)
-        for key in keylist:
-            value = item["attributes"][key]
-            
-            if value in skipped or key in skipped:
-                continue
-
-            # comment = "# " if key in commented else ""
-            if key == "id":
-                # change id to name for the "attach" resource
-                if resource_type == res_type_device_attach: 
-                    value = all_IDs[value] + ".id"
-                else:
-                    key = "# " + key
-
-            # json formats to TF formats
-            if type (value) == bool:
-                value = str (value).lower()
-            # if type (value) == int:
-            #     value = str (value)
-            if type (value) == str:
-                value = value.replace("\n","\\n")   # CLI templates come with "\n" or "\r\n"
-                value = value.replace("\r","")
-                value = f'"{value}"' 
-            if type (value) == list:
-                # simple list - keep 1 liner
-                if type (value[0]) == str:
-                    value = str(value)
-                # complex structure - process line by line
-                else:
-                    value = tfstate_process_list (json.dumps(value, indent=2), resource_type)
-
-                value = value.replace("'",'"')
-            
-            text_tff.add (f"  {key} = {value}")
-    text_tff.add ("}\n")
+process_tfstate_file ()
     
 # ============ Step 5: Write final TF structures + add device variables from Step 1
-text_tff.write()
-text_att.write()
+text_main.write()
+text_device.write()
+text_attach.write()
 
 print (f'Job complete, check *.tf file!')
 

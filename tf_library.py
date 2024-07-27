@@ -1,9 +1,16 @@
-# Helper function
+import os
+
+# Helper class
 class mytext:
     def __init__ (self, filename="", header=""):
         self.filename = filename
-        self.header = header
         self.text = header
+
+        # cleanup previous files so they don't mess up with TF in phase 1
+        try:
+            os.remove(filename)
+        except OSError:
+            pass        
 
     def addraw (self, line):
         self.text = self.text + line
