@@ -23,5 +23,5 @@ This script imports 3 types of terraform resources from the existing SD-WAN depl
 ## Notes
 - Provide non-existing template name and script will print all the known device template names
 - Run script just one time, specifying all the device templates you're interested in rather than running script for each device template. This would avoid duplication of feature template resources that are used in multiple device templates.
-- Script creates and removed working data, including the `tfstate.tf` file. Do not run the script in the production directory to avoid losing it.
+- Script creates and removed working data, including the `terraform.tfstate` state file. Do not run the script in the production directory to avoid losing it.
 - Diagnostics and error handling is minimal, script just exits when something unexpected happends.
