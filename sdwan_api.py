@@ -53,8 +53,7 @@ class sdwan_api:
       response = self.session.request (method=method, url=url, json=payload)
       response.raise_for_status()
     except:
-      raise SystemExit (f"{method} request failed: {url},"
-               f" code {response.status_code}")
+      raise SystemExit (f"{method} request failed: {url}, code {response.status_code}")
 
     try:
       data = response.json()

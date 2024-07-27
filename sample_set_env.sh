@@ -1,5 +1,5 @@
 #!/bin/sh
-# source <filename> to activate!
+# source <filename> to activate
 
 export TF_VAR_MANAGER_ADDR='https://198.18.132.151'
 export TF_VAR_MANAGER_USER='admin'
