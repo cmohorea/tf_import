@@ -15,9 +15,9 @@ This script imports 3 types of terraform resources from the existing SD-WAN depl
 ## How to run
 1. Clone the repository
 2. Enter the repository directory
-3. Define TF_VAR_MANAGER_ADDR/TF_VAR_MANAGER_USER/TF_VAR_MANAGER_PASS environment variables for SD-WAN Manager (vManage) API access
-4. Execute `tf_import.py` script. Supply name(s) of SD-WAN device templates to process,
-5. At this point you can execute `terraform plan` or `terraform apply` to verify configuration or to synchronize it with the SD-WAN ennvironment. Synchronization is required because `sdwan_attach_feature_device_template` resources do not have "import" functionality and the only way, as of now, to create their state in terraform is to push configuration to device(s) with `terraform apply`. Ensure that attach action is successful, also you can confirm that no configuration changes are actually made (hopefully!!) to the device(s) in the SD-WAN Manager GUI in the Audit section.
+3. Define TF_VAR_MANAGER_ADDR/TF_VAR_MANAGER_USER/TF_VAR_MANAGER_PASS environment variables for SD-WAN Manager (vManage) API access (sample file included)
+4. Execute `tf_import.py` script. Supply name(s) of SD-WAN device templates to process, as many as you want.
+5. If all went well and process successfully completed, you can execute `terraform plan` or `terraform apply` right away to verify configuration or to synchronize it with the SD-WAN ennvironment. Synchronization is required because `sdwan_attach_feature_device_template` resources do not have "import" functionality and the only way, as of now, to create their state in terraform is to push configuration to device(s) with `terraform apply`. Ensure that attach action is successful, also you can confirm that no configuration changes are actually made (hopefully!!) to the device(s) in the SD-WAN Manager GUI in the Audit section.
 6. Manage your SD-WAN as a Code now!
 
 ## Notes
